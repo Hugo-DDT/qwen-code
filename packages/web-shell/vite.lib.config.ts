@@ -178,6 +178,10 @@ const TRANSCRIPT_DEAD_MESSAGES = new Map(
       './client/settings/messages.ts',
       './client/settings/messages.transcript-stub.ts',
     ],
+    [
+      './client/components/managed/managed-task-messages.ts',
+      './client/components/managed/managed-task-messages.transcript-stub.ts',
+    ],
   ].map(([module, stub]) => [
     normalizePath(resolve(__dirname, module)),
     normalizePath(resolve(__dirname, stub)),
