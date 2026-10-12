@@ -4395,7 +4395,17 @@ describe('Hosted Harness no-tool session', () => {
         )
         .map((event) => event.payload['operationId']),
     ).toEqual([`${runId}:1`, `${runId}:2`]);
-    await headers(supertest(server).delete(`/session/${SESSION_ID}`));
+    await vi.waitFor(
+      async () => {
+        expect((await operations(fireBody(1, slot))).body.run.state).toBe(
+          'settled',
+        );
+      },
+      { timeout: 10_000, interval: 50 },
+    );
+    await authorize(supertest(server).delete(`/session/${SESSION_ID}`)).expect(
+      204,
+    );
   });
 
   it('answers an operation against a dead journal writer with a retryable 503', async () => {
