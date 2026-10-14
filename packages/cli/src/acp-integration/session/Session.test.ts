@@ -589,6 +589,7 @@ describe('Session', () => {
     isInitialized: ReturnType<typeof vi.fn>;
     refreshSystemInstruction: ReturnType<typeof vi.fn>;
     setTools: ReturnType<typeof vi.fn>;
+    drainPendingMcpReminders: ReturnType<typeof vi.fn>;
     tryCompressChat: ReturnType<typeof vi.fn>;
     activatePreparedMemoryRecallTransition: ReturnType<typeof vi.fn>;
     beginManagedAutoMemoryRecall: ReturnType<typeof vi.fn>;
@@ -852,6 +853,7 @@ describe('Session', () => {
       isInitialized: vi.fn().mockReturnValue(true),
       refreshSystemInstruction: vi.fn().mockResolvedValue(undefined),
       setTools: vi.fn().mockResolvedValue(undefined),
+      drainPendingMcpReminders: vi.fn(),
       tryCompressChat: vi.fn().mockResolvedValue({
         originalTokenCount: 0,
         newTokenCount: 0,
@@ -42762,6 +42764,30 @@ describe('Session', () => {
           (p) => p.text === 'research this',
         );
         expect(reminderIdx).toBeLessThan(userIdx);
+      });
+
+      it('drains queued MCP reminders before sending a user prompt (#14114)', async () => {
+        // session/new MCP servers finish discovery after the chat starts;
+        // setTools() only queues their reminders, and ACP turns never enter
+        // LlmClient.sendMessageStream where core drains them.
+        const order: string[] = [];
+        mockLlmClient.drainPendingMcpReminders = vi.fn(() => {
+          order.push('drain');
+        });
+        (mockChat.sendMessageStream as ReturnType<typeof vi.fn>) = vi
+          .fn()
+          .mockImplementation(async () => {
+            order.push('send');
+            return createEmptyStream();
+          });
+
+        await session.prompt({
+          sessionId: 'test-session-id',
+          prompt: [{ type: 'text', text: 'use the new tools' }],
+        });
+
+        expect(mockLlmClient.drainPendingMcpReminders).toHaveBeenCalledTimes(1);
+        expect(order).toEqual(['drain', 'send']);
       });
 
       it('does not prepend plan-mode reminder in default approval mode', async () => {

@@ -3024,6 +3024,61 @@ describe('Gemini Client (client.ts)', () => {
       );
     });
 
+    it('lets a caller that bypasses sendMessageStream drain queued MCP reminders', async () => {
+      // ACP turns stream through LlmChat directly, so they announce tools
+      // discovered after startChat() through this entry point.
+      const reg = bridgedRegistry(additionTool());
+      reg.getMcpServerInstructions.mockReturnValue(
+        new Map([['addition-server', 'Prefer integer inputs.']]),
+      );
+      const addHistorySpy = quietChat();
+
+      await client.setTools();
+      expect(addHistorySpy).not.toHaveBeenCalled();
+
+      client.drainPendingMcpReminders();
+
+      expect(addHistorySpy).toHaveBeenCalledWith(
+        userText(
+          buildMcpServerInstructionsReminderFromEntries(
+            new Map([['addition-server', 'Prefer integer inputs.']]),
+          )!,
+        ),
+      );
+      expect(addHistorySpy).toHaveBeenCalledWith(
+        mcpReminder('mcp__addition-server__add', ''),
+      );
+      expect(addHistorySpy).toHaveBeenCalledTimes(2);
+
+      addHistorySpy.mockClear();
+      client.drainPendingMcpReminders();
+      await runTurn();
+      expect(addHistorySpy).not.toHaveBeenCalled();
+    });
+
+    it('keeps queued MCP reminders while the history ends in a functionCall', async () => {
+      bridgedRegistry(additionTool());
+      const addHistorySpy = quietChat();
+      await client.setTools();
+      const peekSpy = vi
+        .spyOn(client.getChat(), 'peekLastHistoryEntry')
+        .mockReturnValue({
+          role: 'model',
+          parts: [
+            { functionCall: { id: 'call-1', name: 'read_file', args: {} } },
+          ],
+        });
+
+      client.drainPendingMcpReminders();
+      expect(addHistorySpy).not.toHaveBeenCalled();
+
+      peekSpy.mockReturnValue({ role: 'model', parts: [{ text: 'done' }] });
+      client.drainPendingMcpReminders();
+      expect(addHistorySpy).toHaveBeenCalledWith(
+        mcpReminder('mcp__addition-server__add', ''),
+      );
+    });
+
     it('delivers late MCP server instructions once on the next user turn', async () => {
       const reg = registryMock();
       const instructions = (text: string) =>

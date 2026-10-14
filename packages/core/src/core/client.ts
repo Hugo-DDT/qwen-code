@@ -2475,6 +2475,41 @@ export class LlmClient {
   }
 
   /**
+   * Announce the MCP changes queued by `setTools()`: late server instructions
+   * and MCP tools added or removed since the last announcement.
+   * `sendMessageStream` runs this at the start of each user query or cron
+   * turn. Callers that stream through `LlmChat` directly (the ACP session)
+   * must call it before building their request, or tools discovered after
+   * `startChat()` stay unannounced.
+   *
+   * Each reminder becomes its own `user` history entry, so nothing is drained
+   * while history ends in a model `functionCall`: its `functionResponse` must
+   * come next. The queue is kept for the next turn instead.
+   */
+  drainPendingMcpReminders(): void {
+    const lastMessage = this.peekLastHistoryEntry();
+    if (
+      lastMessage?.role === 'model' &&
+      lastMessage.parts?.some((part) => 'functionCall' in part)
+    ) {
+      return;
+    }
+    try {
+      this.drainPendingMcpServerInstructionsReminder();
+    } catch (error) {
+      debugLogger.warn(
+        'drainPendingMcpServerInstructionsReminder failed',
+        error,
+      );
+    }
+    try {
+      this.drainPendingAddedMcpToolsReminder();
+    } catch (error) {
+      debugLogger.warn('drainPendingAddedMcpToolsReminder failed', error);
+    }
+  }
+
+  /**
    * Per-turn delta for skills/commands that became invocable after session start
    * — skills enabled mid-session (e.g. via `/skills`) and MCP prompts added after
    * startup. Emitted as a tail `<system-reminder>` only, so it never mutates the
@@ -4498,19 +4533,7 @@ export class LlmClient {
         (messageType === SendMessageType.UserQuery ||
           messageType === SendMessageType.Cron)
       ) {
-        try {
-          this.drainPendingMcpServerInstructionsReminder();
-        } catch (error) {
-          debugLogger.warn(
-            'drainPendingMcpServerInstructionsReminder failed',
-            error,
-          );
-        }
-        try {
-          this.drainPendingAddedMcpToolsReminder();
-        } catch (error) {
-          debugLogger.warn('drainPendingAddedMcpToolsReminder failed', error);
-        }
+        this.drainPendingMcpReminders();
         try {
           await this.drainSkillAndCommandReminders();
         } catch (error) {

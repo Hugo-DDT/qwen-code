@@ -6712,6 +6712,13 @@ export class Session implements SessionContext {
               }
             }
 
+            // MCP tools discovered since the last turn go into history before
+            // this request is built. A restore turn sends a functionResponse
+            // instead, so it leaves them queued.
+            if (!isRestoreAskUserQuestion) {
+              this.#drainPendingMcpReminders();
+            }
+
             // Prepend session-level system reminders (plan mode / subagent /
             // arena) so the model sees them, matching the behaviour of
             // `LlmClient.sendMessageStream` in the CLI/TUI path. Without this,
@@ -10832,6 +10839,7 @@ export class Session implements SessionContext {
                 .getMemoryManager()
                 .resetExhaustedBodyRefsForCurrentTurn();
 
+              this.#drainPendingMcpReminders();
               // Prepend session-level system reminders (same rationale as the
               // user-query path in #executePrompt).
               const cronReminders = await this.#buildInitialSystemReminders();
@@ -13976,6 +13984,25 @@ export class Session implements SessionContext {
       });
     } finally {
       await refreshMemoryIfNeeded();
+    }
+  }
+
+  /**
+   * Announce MCP tools and server instructions that `setTools()` queued since
+   * the last turn. MCP servers from `session/new` finish discovery after the
+   * chat has started, and core drains their reminders only inside
+   * `LlmClient.sendMessageStream`, which ACP turns bypass. Without this, the
+   * model is never told those tools exist. Run it at the start of a user query
+   * or cron fire, before the request is assembled; the client keeps the queue
+   * while history ends in an unanswered `functionCall`.
+   */
+  #drainPendingMcpReminders(): void {
+    try {
+      this.config.getLlmClient()?.drainPendingMcpReminders();
+    } catch (error) {
+      debugLogger.warn(
+        `drainPendingMcpReminders failed: ${this.#formatError(error)}`,
+      );
     }
   }
 
